@@ -1,0 +1,9 @@
+flask==3.0.0
+flask-socketio==5.3.6
+paho-mqtt==1.6.1
+python-dotenv==1.0.0
+schedule==1.2.1
+requests==2.31.0
+Adafruit-DHT==1.4.0
+pyserial==3.5
+eventlet==0.35.2
