@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Home Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1d2e; --accent: #4f9cf9;
+    --green: #22d3a5; --red: #f97b6b; --text: #e2e8f0; --sub: #8892a4;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; padding: 24px; }
+  h1 { font-size: 1.5rem; margin-bottom: 24px; }
+  h1 span { color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border-radius: 12px; padding: 20px; }
+  .card h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: .08em; color: var(--sub); margin-bottom: 14px; }
+  .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .badge { padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+  .on  { background: rgba(34,211,165,.15); color: var(--green); }
+  .off { background: rgba(249,123,107,.1);  color: var(--red); }
+  button { border: none; cursor: pointer; padding: 6px 14px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; transition: opacity .2s; }
+  button:hover { opacity: .8; }
+  .btn-on  { background: var(--green); color: #0f1117; }
+  .btn-off { background: #2a2d3e; color: var(--text); }
+  .big-val { font-size: 2.2rem; font-weight: 700; color: var(--accent); }
+  .sub-val { font-size: 0.8rem; color: var(--sub); margin-top: 4px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot-on  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot-off { background: #444; }
+</style>
+</head>
+<body>
+
+<h1>🏠 Smart <span>Home</span> Dashboard</h1>
+
+<div class="grid">
+
+  <!-- Thermostat -->
+  <div class="card">
+    <h2>🌡️ Thermostat</h2>
+    <div class="big-val" id="cur-temp">--°C</div>
+    <div class="sub-val" id="cur-hum">Humidity: --%</div>
+    <div class="row" style="margin-top:14px">
+      <label style="font-size:.85rem">Target: <span id="target-label">22°C</span></label>
+      <input type="range" id="target-temp" min="16" max="32" value="22"
+             oninput="document.getElementById('target-label').textContent=this.value+'°C'"
+             onchange="setTemp(this.value)">
+    </div>
+  </div>
+
+  <!-- Lighting -->
+  <div class="card">
+    <h2>💡 Lighting</h2>
+    <div id="lights-list"></div>
+  </div>
+
+  <!-- Door Locks -->
+  <div class="card">
+    <h2>🔒 Door Locks</h2>
+    <div id="locks-list"></div>
+  </div>
+
+  <!-- Appliances -->
+  <div class="card">
+    <h2>⚡ Appliances</h2>
+    <div id="appliance-list"></div>
+  </div>
+
+</div>
+
+<script>
+  const socket = io();
+
+  async function api(url, method='POST', body=null) {
+    const res = await fetch(url, {
+      method, headers: {'Content-Type':'application/json'},
+      body: body ? JSON.stringify(body) : null
+    });
+    return res.json();
+  }
+
+  async function loadStatus() {
+    const data = await api('/api/status', 'GET');
+    renderLights(data.lighting);
+    renderLocks(data.door_lock);
+    renderAppliances(data.appliance);
+    if (data.thermostat.current_temp) {
+      document.getElementById('cur-temp').textContent = data.thermostat.current_temp + '°C';
+      document.getElementById('cur-hum').textContent  = 'Humidity: ' + data.thermostat.current_humidity + '%';
+    }
+  }
+
+  function renderLights(lights) {
+    const el = document.getElementById('lights-list');
+    el.innerHTML = Object.entries(lights).map(([room, d]) => `
+      <div class="row">
+        <span><span class="status-dot ${d.state?'dot-on':'dot-off'}"></span>${room.replace('_',' ')}</span>
+        <button class="${d.state?'btn-off':'btn-on'}"
+          onclick="toggleLight('${room}', ${!d.state})">${d.state?'OFF':'ON'}</button>
+      </div>`).join('');
+  }
+
+  function renderLocks(locks) {
+    const el = document.getElementById('locks-list');
+    el.innerHTML = Object.entries(locks).map(([loc, d]) => `
+      <div class="row">
+        <span><span class="status-dot ${d.locked?'dot-on':'dot-off'}"></span>${loc.replace('_',' ')}</span>
+        <span class="badge ${d.locked?'on':'off'}">${d.locked?'Locked':'Unlocked'}</span>
+        <button class="${d.locked?'btn-off':'btn-on'}"
+          onclick="toggleLock('${loc}', ${!d.locked})">${d.locked?'Unlock':'Lock'}</button>
+      </div>`).join('');
+  }
+
+  function renderAppliances(apps) {
+    const el = document.getElementById('appliance-list');
+    el.innerHTML = Object.entries(apps).map(([name, d]) => `
+      <div class="row">
+        <span><span class="status-dot ${d.state?'dot-on':'dot-off'}"></span>${name.replace('_',' ')}</span>
+        <button class="${d.state?'btn-off':'btn-on'}"
+          onclick="toggleAppliance('${name}', ${!d.state})">${d.state?'OFF':'ON'}</button>
+      </div>`).join('');
+  }
+
+  async function toggleLight(room, on) {
+    const data = await api(`/api/lighting/${room}/${on?'on':'off'}`);
+    renderLights(data.status);
+  }
+  async function toggleLock(loc, unlock) {
+    const data = await api(`/api/door/${loc}/${unlock?'unlock':'lock'}`);
+    renderLocks(data.status);
+  }
+  async function toggleAppliance(name, on) {
+    const data = await api(`/api/appliance/${name}/${on?'on':'off'}`);
+    renderAppliances(data.status);
+  }
+  async function setTemp(val) {
+    await api('/api/thermostat/set', 'POST', {target_temp: parseFloat(val)});
+  }
+
+  // Live updates via SocketIO
+  socket.on('thermostat_update', d => {
+    if (d.current_temp) document.getElementById('cur-temp').textContent = d.current_temp + '°C';
+    if (d.current_humidity) document.getElementById('cur-hum').textContent = 'Humidity: ' + d.current_humidity + '%';
+  });
+  socket.on('lighting_update',  d => renderLights(d));
+  socket.on('door_update',      d => renderLocks(d));
+  socket.on('appliance_update', d => renderAppliances(d));
+
+  loadStatus();
+</script>
+</body>
+</html>
